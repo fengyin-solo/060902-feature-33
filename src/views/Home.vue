@@ -74,6 +74,51 @@
         </div>
       </div>
 
+      <div class="stats-overview">
+        <div class="stat-card">
+          <div class="stat-icon">👤</div>
+          <div class="stat-info">
+            <div class="stat-value">{{ stats.contactCount }}</div>
+            <div class="stat-label">联系人数量</div>
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">💬</div>
+          <div class="stat-info">
+            <div class="stat-value">{{ stats.totalMessages }}</div>
+            <div class="stat-label">短信总数</div>
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">📅</div>
+          <div class="stat-info">
+            <div class="stat-value">{{ stats.timeSpan }}</div>
+            <div class="stat-label">时间跨度</div>
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">🎯</div>
+          <div class="stat-info">
+            <div class="stat-value">{{ stats.hitRate }}%</div>
+            <div class="stat-label">识别命中率</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="detector-hits" v-if="stats.detectorHits.length > 0">
+        <h4>🔍 识别命中概览</h4>
+        <div class="hit-items">
+          <div 
+            v-for="hit in stats.detectorHits" 
+            :key="hit.name" 
+            class="hit-item"
+          >
+            <span class="hit-label">{{ hit.label }}</span>
+            <span class="hit-count">{{ hit.count }} 次命中</span>
+          </div>
+        </div>
+      </div>
+
       <div class="conversations-list">
         <div 
           v-for="(item, idx) in store.loveLetters.slice(0, 5)" 
@@ -123,15 +168,72 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { store } from '@/store'
 import { parseSmsFile, generateDemoData } from '@/parsers'
-import { findLoveLetters } from '@/detectors'
+import { findLoveLetters, getDetectors } from '@/detectors'
 
 const router = useRouter()
 const fileInput = ref(null)
 const isDragging = ref(false)
+
+const stats = computed(() => {
+  const convs = store.conversations
+  const letters = store.loveLetters
+
+  const contactCount = convs.length
+
+  let totalMessages = 0
+  for (const conv of convs) {
+    totalMessages += conv.messages.length
+  }
+
+  let timeSpan = '—'
+  let minDate = Infinity
+  let maxDate = -Infinity
+  for (const conv of convs) {
+    for (const msg of conv.messages) {
+      if (msg.date) {
+        const t = typeof msg.date === 'number' ? msg.date : new Date(msg.date).getTime()
+        if (t < minDate) minDate = t
+        if (t > maxDate) maxDate = t
+      }
+    }
+  }
+  if (minDate !== Infinity && maxDate !== -Infinity) {
+    const diffMs = maxDate - minDate
+    const diffDays = Math.floor(diffMs / 86400000)
+    if (diffDays >= 365) {
+      const years = Math.floor(diffDays / 365)
+      const remainDays = diffDays % 365
+      timeSpan = remainDays > 0 ? `${years}年${remainDays}天` : `${years}年`
+    } else if (diffDays >= 30) {
+      const months = Math.floor(diffDays / 30)
+      const remainDays = diffDays % 30
+      timeSpan = remainDays > 0 ? `${months}个月${remainDays}天` : `${months}个月`
+    } else {
+      timeSpan = `${diffDays}天`
+    }
+  }
+
+  const hitRate = convs.length > 0
+    ? Math.round((letters.length / convs.length) * 100)
+    : 0
+
+  const detectorsList = getDetectors()
+  const detectorHits = detectorsList.map(d => {
+    let count = 0
+    for (const letter of letters) {
+      if (letter.scores && letter.scores[d.name] && letter.scores[d.name] > 0) {
+        count++
+      }
+    }
+    return { name: d.name, label: d.label || d.name, count }
+  }).filter(d => d.count > 0)
+
+  return { contactCount, totalMessages, timeSpan, hitRate, detectorHits }
+})
 
 function triggerFileInput() {
   fileInput.value.click()
@@ -447,5 +549,92 @@ function getTagClass(tag) {
   justify-content: space-between;
   color: var(--text-light);
   font-size: 0.9rem;
+}
+
+.stats-overview {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.stat-card {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  background: var(--card-bg);
+  border-radius: 12px;
+  padding: 1.25rem;
+  box-shadow: var(--shadow);
+  border: 1px solid var(--border);
+  transition: transform 0.2s;
+}
+
+.stat-card:hover {
+  transform: translateY(-2px);
+}
+
+.stat-icon {
+  font-size: 2rem;
+  flex-shrink: 0;
+}
+
+.stat-value {
+  font-size: 1.5rem;
+  font-weight: bold;
+  color: var(--love-red);
+  line-height: 1.2;
+}
+
+.stat-label {
+  font-size: 0.85rem;
+  color: var(--text-light);
+  margin-top: 0.2rem;
+}
+
+.detector-hits {
+  background: var(--card-bg);
+  border-radius: 12px;
+  padding: 1.25rem;
+  box-shadow: var(--shadow);
+  border: 1px solid var(--border);
+  margin-bottom: 1.5rem;
+}
+
+.detector-hits h4 {
+  margin-bottom: 1rem;
+  color: var(--text-dark);
+}
+
+.hit-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.hit-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  background: var(--bg-light);
+  border-radius: 20px;
+  font-size: 0.9rem;
+}
+
+.hit-label {
+  color: var(--text-dark);
+  font-weight: 500;
+}
+
+.hit-count {
+  color: var(--love-red);
+  font-weight: 600;
+}
+
+@media (max-width: 768px) {
+  .stats-overview {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }
 </style>
